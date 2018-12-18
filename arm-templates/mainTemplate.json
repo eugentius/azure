@@ -1,0 +1,660 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "DBadministratorLogin": {
+            "type": "string",
+            "minLength": 1,
+            "metadata": {
+                "description": "Database administrator login name"
+            }
+        },
+        "DBadministratorLoginPassword": {
+            "type": "securestring",
+            "minLength": 8,
+            "maxLength": 128,
+            "metadata": {
+                "description": "Database administrator password"
+            }
+        },
+        "wp_userPassword": {
+            "type": "securestring",
+            "minLength": 8,
+            "maxLength": 128,
+            "metadata": {
+                "description": "Database wp_user password"
+            }
+        },
+        "virtualMachineScaleSets_webServers_name": {
+            "defaultValue": "webServers",
+            "type": "String"
+        },
+        "loadBalancers_webServerslb_name": {
+            "defaultValue": "webServersLB",
+            "type": "String"
+        },
+        "autoscalesettings_cpuautoscalewebserver_name": {
+            "defaultValue": "cpuautoscalewebserver",
+            "type": "String"
+        },
+        "publicIPAddresses_gridu_pip_name": {
+            "defaultValue": "gridu_pip",
+            "type": "String"
+        },
+        "networkSecurityGroups_webServersnsg_name": {
+            "defaultValue": "webServersnsg",
+            "type": "String"
+        },
+        "virtualNetworks_virtual_network_name": {
+            "defaultValue": "griduVirtualNetwork",
+            "type": "String"
+        },
+        "STORAGEKEY": {
+            "defaultValue": "",
+            "type": "String"
+        }
+    },
+    "variables": {},
+    "resources": [    
+        {
+            "comments": "MYSQL Databse",
+            "name": "gridudb",
+            "type": "Microsoft.DBforMySQL/servers",
+            "apiVersion": "2017-12-01",
+            "sku": {
+              "name": "GP_Gen4_2"
+            },
+            "properties": {
+              "version": "5.7",
+              "administratorLogin": "[parameters('DBadministratorLogin')]",
+              "administratorLoginPassword": "[parameters('DBadministratorLoginPassword')]",
+              "sslEnforcement": "Disabled",
+              "storageProfile": {
+                "storageMB": 5120,
+                "backupRetentionDays": 7,
+                "geoRedundantBackup": "Disabled"
+              }
+            },
+            "location": "westeurope",
+            "tags": {},
+            "resources": [
+                {
+                    "name": "wp_db",
+                    "type": "databases",
+                    "apiVersion": "2017-12-01",
+                    "properties": {
+                        "charset": "utf8",
+                        "collation": "utf8_general_ci"
+                    },
+                    "dependsOn": [
+                        "[concat('Microsoft.DBforMySQL/servers/', 'gridudb')]"
+                    ]
+                },
+                {
+                    "name": "vurtual_network_rule",
+                    "type": "/virtualNetworkRules",
+                    "apiVersion": "2017-12-01",
+                    "properties": {
+                      "virtualNetworkSubnetId": "[concat(resourceId('Microsoft.Network/virtualNetworks', parameters('virtualNetworks_virtual_network_name')), '/subnets/', 'webServersSubnet')]",
+                      "ignoreMissingVnetServiceEndpoint": false
+                    },
+                    "dependsOn": [
+                        "[concat('Microsoft.DBforMySQL/servers/', 'gridudb')]"
+                    ]
+                },
+                {
+                    "type": "firewallrules",
+                    "apiVersion": "2017-12-01",
+                    "dependsOn": [
+                        "[concat('Microsoft.DBforMySQL/servers/', 'gridudb', '/databases/' , 'wp_db')]",
+                        "[concat('Microsoft.DBforMySQL/servers/', 'gridudb')]"
+                    ],
+                    "location": "westeurope",
+                    "name": "AllowAzureIPs",
+                    "properties": {
+                        "startIpAddress": "0.0.0.0",
+                        "endIpAddress": "0.0.0.0"
+                    }
+                }
+            ],
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks', parameters('virtualNetworks_virtual_network_name'))]"
+            ]
+        },
+
+
+
+        {
+            "comments": "Scale Set",
+            "type": "Microsoft.Compute/virtualMachineScaleSets",
+            "sku": {
+                "name": "Standard_DS1_v2",
+                "tier": "Standard",
+                "capacity": 2
+            },
+            "name": "webServers",
+            "apiVersion": "2018-06-01",
+            "location": "westeurope",
+            "scale": null,
+            "properties": {
+                "singlePlacementGroup": true,
+                "upgradePolicy": {
+                    "mode": "Automatic",
+                    "automaticOSUpgrade": false
+                },
+                "virtualMachineProfile": {
+                    "osProfile": {
+                        "computerNamePrefix": "webserver",
+                        "adminUsername": "eugentius",
+                        "linuxConfiguration": {
+                            "disablePasswordAuthentication": true,
+                            "ssh": {
+                                "publicKeys": [
+                                    {
+                                        "path": "/home/eugentius/.ssh/authorized_keys",
+                                        "keyData": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDUjbDJwQILrELvsgaIPRznVbrdHzWwWjEiOkeCbHiVsiIR0YXdnr7PEA0i2MqI7Me00OpFuZclhNniV9ZQJn2GdD+1bPKLgAXmAWcq2Dd3WjJsnQdeEYw8PfCn/aCL3bhor8oLptssCchJxmPKZFhVytOwP+NPw38H5XkZmLItf9khd+Ij+LAsuajJw2/DlkOL1ZcqCBy3L1CXIZ8VHQUJNtYNKpwFCrPnIWSp8i86GiiInvfVlM7X762vsuxfNHhkr3GR5nzOy/3LGPrVzcNs3oltVyvLItdxJeKFKXWXE0a4TSjgZ0hd7BdTB6H4ZBbpNp0M3ZS7DACcOcW9ns1r\n"
+                                    }
+                                ]
+                            },
+                            "provisionVMAgent": true
+                        },
+                        "secrets": []
+                    },
+                    "storageProfile": {
+                        "osDisk": {
+                            "createOption": "FromImage",
+                            "caching": "None",
+                            "managedDisk": {
+                                "storageAccountType": "Standard_LRS"
+                            }
+                        },
+                        "imageReference": {
+                            "publisher": "Canonical",
+                            "offer": "UbuntuServer",
+                            "sku": "16.04-LTS",
+                            "version": "latest"
+                        }
+                    },
+                    "networkProfile": {
+                        "networkInterfaceConfigurations": [
+                            {
+                                "name": "[concat(parameters('virtualMachineScaleSets_webServers_name'),'Nic')]",
+                                "properties": {
+                                    "primary": true,
+                                    "enableAcceleratedNetworking": false,
+                                    "dnsSettings": {
+                                        "dnsServers": []
+                                    },
+                                    "enableIPForwarding": false,
+                                    "ipConfigurations": [
+                                        {
+                                            "name": "[concat(parameters('virtualMachineScaleSets_webServers_name'),'IpConfig')]",
+                                            "properties": {
+                                                "subnet": {
+                                                    "id": "[concat(resourceId('Microsoft.Network/virtualNetworks', parameters('virtualNetworks_virtual_network_name')), '/subnets/', 'webServersSubnet')]"
+                                                  },
+                                                "privateIPAddressVersion": "IPv4",
+                                                "loadBalancerBackendAddressPools": [
+                                                    {
+                                                        "id": "[concat(resourceId('Microsoft.Network/loadBalancers', parameters('loadBalancers_webServerslb_name')), '/backendAddressPools/bepool')]"
+                                                    }
+                                                ],
+                                                "loadBalancerInboundNatPools": [
+                                                    {
+                                                        "id": "[concat(resourceId('Microsoft.Network/loadBalancers', parameters('loadBalancers_webServerslb_name')), '/inboundNatPools/natpool')]"
+                                                    }
+                                                ]
+                                            }
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    },
+                    "priority": "Regular"
+                },
+                "overprovision": true
+            },
+            "resources": [
+               {
+                "name": "web-servers-config",
+                "type": "extensions",
+                "apiVersion": "2018-10-01",
+                "properties": {
+                  "publisher": "Microsoft.Azure.Extensions",
+                  "type": "CustomScript",
+                  "typeHandlerVersion": "2.0",
+                  "autoUpgradeMinorVersion": false,
+                  "settings": {
+                    "fileUris": [
+                      "https://raw.githubusercontent.com/eugentius/azure/master/automation/web_server.sh"
+                    ]
+                  },
+                  "protectedSettings": {    
+                    "commandToExecute": "[concat('./web_server.sh ', 'gridudb',' ', parameters('wp_userPassword'), ' ', 'mygridustorageacct', ' ', parameters('STORAGEKEY'))]"
+                  }
+                },
+                "dependsOn": [
+                    "[concat('Microsoft.Compute/virtualMachineScaleSets/', 'webServers')]"
+                ]
+              }
+            ],
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/loadBalancers', parameters('loadBalancers_webServerslb_name'))]",
+                "[resourceId('Microsoft.Network/virtualNetworks', parameters('virtualNetworks_virtual_network_name'))]"
+            ]
+        },
+
+
+
+        {
+            "comments": "Autoscale Settings",
+            "type": "microsoft.insights/autoscalesettings",
+            "name": "[parameters('autoscalesettings_cpuautoscalewebserver_name')]",
+            "apiVersion": "2014-04-01",
+            "location": "westeurope",
+            "tags": {},
+            "scale": null,
+            "properties": {
+                "profiles": [
+                    {
+                        "name": "Profile1",
+                        "capacity": {
+                            "minimum": "1",
+                            "maximum": "4",
+                            "default": "2"
+                        },
+                        "rules": [
+                            {
+                                "metricTrigger": {
+                                    "metricName": "Percentage CPU",
+                                    "metricNamespace": "",
+                                    "metricResourceUri": "[resourceId('Microsoft.Compute/virtualMachineScaleSets', parameters('virtualMachineScaleSets_webServers_name'))]",
+                                    "timeGrain": "PT1M",
+                                    "statistic": "Average",
+                                    "timeWindow": "PT5M",
+                                    "timeAggregation": "Average",
+                                    "operator": "GreaterThan",
+                                    "threshold": 75,
+                                    "dimensions": null
+                                },
+                                "scaleAction": {
+                                    "direction": "Increase",
+                                    "type": "ChangeCount",
+                                    "value": "1",
+                                    "cooldown": "PT1M"
+                                }
+                            },
+                            {
+                                "metricTrigger": {
+                                    "metricName": "Percentage CPU",
+                                    "metricNamespace": "",
+                                    "metricResourceUri": "[resourceId('Microsoft.Compute/virtualMachineScaleSets', parameters('virtualMachineScaleSets_webServers_name'))]",
+                                    "timeGrain": "PT1M",
+                                    "statistic": "Average",
+                                    "timeWindow": "PT5M",
+                                    "timeAggregation": "Average",
+                                    "operator": "LessThan",
+                                    "threshold": 25,
+                                    "dimensions": null
+                                },
+                                "scaleAction": {
+                                    "direction": "Decrease",
+                                    "type": "ChangeCount",
+                                    "value": "1",
+                                    "cooldown": "PT1M"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "enabled": true,
+                "name": "[parameters('autoscalesettings_cpuautoscalewebserver_name')]",
+                "targetResourceUri": "[resourceId('Microsoft.Compute/virtualMachineScaleSets', parameters('virtualMachineScaleSets_webServers_name'))]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Compute/virtualMachineScaleSets', parameters('virtualMachineScaleSets_webServers_name'))]"
+            ]
+        },
+
+
+        {
+            "comments": "Loadbalancer",
+            "type": "Microsoft.Network/loadBalancers",
+            "sku": {
+                "name": "Basic",
+                "tier": "Regional"
+            },
+            "name": "[parameters('loadBalancers_webServerslb_name')]",
+            "apiVersion": "2018-08-01",
+            "location": "westeurope",
+            "scale": null,
+            "properties": {
+                "frontendIPConfigurations": [
+                    {
+                      "properties": {
+                        "subnet": {
+                          "id": "[concat(resourceId('Microsoft.Network/virtualNetworks', parameters('virtualNetworks_virtual_network_name')), '/subnets/', 'webServersSubnet')]"
+                        },
+                        "privateIPAddress": "10.0.0.5",
+                        "privateIPAllocationMethod": "Static"
+                      },
+                      "name": "LoadBalancerFrontend"
+                    }
+                ],
+                "backendAddressPools": [
+                    {
+                        "name": "bepool",
+                        "properties": {}
+                    }
+                ],
+                "loadBalancingRules": [
+                    {
+                        "name": "LBRule",
+                        "properties": {
+                            "frontendIPConfiguration": {
+                                "id": "[concat(resourceId('Microsoft.Network/loadBalancers', parameters('loadBalancers_webServerslb_name')), '/frontendIPConfigurations/LoadBalancerFrontEnd')]"
+                            },
+                            "frontendPort": 443,
+                            "backendPort": 443,
+                            "enableFloatingIP": false,
+                            "idleTimeoutInMinutes": 5,
+                            "protocol": "Tcp",
+                            "enableTcpReset": false,
+                            "loadDistribution": "Default",
+                            "disableOutboundSnat": false,
+                            "backendAddressPool": {
+                                "id": "[concat(resourceId('Microsoft.Network/loadBalancers', parameters('loadBalancers_webServerslb_name')), '/backendAddressPools/bepool')]"
+                            },
+                            "probe": {
+                                "id": "[concat(resourceId('Microsoft.Network/loadBalancers', parameters('loadBalancers_webServerslb_name')), '/probes/tcpProbe')]"
+                            }
+                        }
+                    }
+                ],
+                "probes": [
+                    {
+                        "name": "tcpProbe",
+                        "properties": {
+                            "protocol": "Tcp",
+                            "port": 80,
+                            "intervalInSeconds": 5,
+                            "numberOfProbes": 2
+                        }
+                    }
+                ],
+                "outboundRules": [],
+                "inboundNatPools": [
+                    {
+                      "name": "natpool",
+                      "properties": {
+                        "frontendIPConfiguration": {
+                          "id": "[concat(resourceId('Microsoft.Network/loadBalancers', parameters('loadBalancers_webServerslb_name')), '/frontendIPConfigurations/LoadBalancerFrontEnd')]"
+                        },
+                        "protocol": "tcp",
+                        "frontendPortRangeStart": "50000",
+                        "frontendPortRangeEnd": "50100",
+                        "backendPort": "22"
+                      }
+                    }
+                  ]
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks', parameters('virtualNetworks_virtual_network_name'))]"
+            ]
+        },
+
+
+
+        {
+            "comments": "Public IP",
+            "type": "Microsoft.Network/publicIPAddresses",
+            "sku": {
+                "name": "Basic",
+                "tier": "Regional"
+            },
+            "name": "[parameters('publicIPAddresses_gridu_pip_name')]",
+            "apiVersion": "2018-08-01",
+            "location": "westeurope",
+            "scale": null,
+            "properties": {
+                "publicIPAddressVersion": "IPv4",
+                "publicIPAllocationMethod": "Dynamic",
+                "idleTimeoutInMinutes": 4,
+                "ipTags": []
+            },
+            "dependsOn": []
+        },
+
+
+
+
+        {
+            "comments": "Virtual Network",
+            "type": "Microsoft.Network/virtualNetworks",
+            "name": "[parameters('virtualNetworks_virtual_network_name')]",
+            "apiVersion": "2018-08-01",
+            "location": "westeurope",
+            "scale": null,
+            "properties": {
+                "addressSpace": {
+                    "addressPrefixes": [
+                        "10.0.0.0/24"
+                    ]
+                },
+                "subnets": [
+                    {
+                        "name": "webServersSubnet",
+                        "properties": {
+                            "addressPrefix": "10.0.0.0/28",
+                            "delegations": [],
+                            "serviceEndpoints": [
+                                {
+                                  "service": "Microsoft.Sql"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "name": "GatewaySubnet",
+                        "properties": {
+                            "addressPrefix": "10.0.0.16/28",
+                            "delegations": []
+                        }
+                    }
+                ],
+                "virtualNetworkPeerings": [],
+                "enableDdosProtection": false,
+                "enableVmProtection": false
+            }
+        },
+
+
+
+        {
+            "comments": "jumpBox",
+            "type": "Microsoft.Compute/virtualMachines",
+            "name": "jumpBox",
+            "apiVersion": "2018-06-01",
+            "location": "westeurope",
+            "tags": {},
+            "scale": null,
+            "properties": {
+                "hardwareProfile": {
+                    "vmSize": "Standard_B1s"
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "Canonical",
+                        "offer": "UbuntuServer",
+                        "sku": "16.04-LTS",
+                        "version": "latest"
+                    },
+                    "osDisk": {
+                        "osType": "Linux",
+                        "createOption": "FromImage",
+                        "caching": "None",
+                        "managedDisk": {
+                            "storageAccountType": "Standard_LRS"
+                        },
+                        "diskSizeGB": 30
+                    },
+                    "dataDisks": []
+                },
+                "osProfile": {
+                    "computerName": "jumpBox",
+                    "adminUsername": "eugentius",
+                    "linuxConfiguration": {
+                        "disablePasswordAuthentication": true,
+                        "ssh": {
+                            "publicKeys": [
+                                {
+                                    "path": "/home/eugentius/.ssh/authorized_keys",
+                                    "keyData": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDUjbDJwQILrELvsgaIPRznVbrdHzWwWjEiOkeCbHiVsiIR0YXdnr7PEA0i2MqI7Me00OpFuZclhNniV9ZQJn2GdD+1bPKLgAXmAWcq2Dd3WjJsnQdeEYw8PfCn/aCL3bhor8oLptssCchJxmPKZFhVytOwP+NPw38H5XkZmLItf9khd+Ij+LAsuajJw2/DlkOL1ZcqCBy3L1CXIZ8VHQUJNtYNKpwFCrPnIWSp8i86GiiInvfVlM7X762vsuxfNHhkr3GR5nzOy/3LGPrVzcNs3oltVyvLItdxJeKFKXWXE0a4TSjgZ0hd7BdTB6H4ZBbpNp0M3ZS7DACcOcW9ns1r\n"
+                                }
+                            ]
+                        },
+                        "provisionVMAgent": true
+                    },
+                    "secrets": [],
+                    "allowExtensionOperations": true
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', 'jumpBoxNic')]"
+                        }
+                    ]
+                }
+            },
+            "resources": [
+                {
+                 "name": "jumpBoxExtensionScript",
+                 "type": "extensions",
+                 "apiVersion": "2018-10-01",
+                 "location": "westeurope",
+                 "properties": {
+                   "publisher": "Microsoft.Azure.Extensions",
+                   "type": "CustomScript",
+                   "typeHandlerVersion": "2.0",
+                   "autoUpgradeMinorVersion": false,
+                   "settings": {
+                     "fileUris": [
+                       "https://raw.githubusercontent.com/eugentius/azure/master/automation/jumpBox.sh"
+                     ]
+                   },
+                   "protectedSettings": {    
+                     "commandToExecute": "[concat('./jumpBox.sh',' ', 'gridudb',' ',parameters('DBadministratorLoginPassword'), ' ', parameters('wp_userPassword'), ' ', 'mygridustorageacct', ' ', parameters('STORAGEKEY'))]"
+                   }
+                 },
+                 "dependsOn": [
+                     "[concat('Microsoft.Compute/virtualMachines/', 'jumpBox')]"
+                 ]
+               }
+            ],
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/networkInterfaces', 'jumpBoxNic')]",
+                "[resourceId('Microsoft.DBforMySQL/servers', 'gridudb')]"
+            ]
+        },
+
+
+
+        {
+            "comments": "JumpBox NIC",
+            "type": "Microsoft.Network/networkInterfaces",
+            "name": "jumpBoxNic",
+            "apiVersion": "2018-08-01",
+            "location": "westeurope",
+            "tags": {},
+            "scale": null,
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfigjumpBox",
+                        "properties": {
+                            "privateIPAllocationMethod": "Dynamic",
+                            "subnet": {
+                                "id": "[concat(resourceId('Microsoft.Network/virtualNetworks', parameters('virtualNetworks_virtual_network_name')), '/subnets/', 'webServersSubnet')]"
+                            },
+                            "primary": true,
+                            "privateIPAddressVersion": "IPv4"
+                        }
+                    }
+                ],
+                "dnsSettings": {
+                    "dnsServers": [],
+                    "appliedDnsServers": []
+                },
+                "enableAcceleratedNetworking": false,
+                "enableIPForwarding": false,
+                "primary": true,
+                "tapConfigurations": []
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks', parameters('virtualNetworks_virtual_network_name'))]"
+            ]
+        },
+
+
+
+        {
+            "comments": "VPN GW",
+            "type": "Microsoft.Network/virtualNetworkGateways",
+            "name": "vpn-gw",
+            "apiVersion": "2018-08-01",
+            "location": "westeurope",
+            "scale": null,
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "default",
+                        "properties": {
+                            "privateIPAllocationMethod": "Dynamic",
+                            "publicIPAddress": {
+                                "id": "[resourceId('Microsoft.Network/publicIPAddresses', parameters('publicIPAddresses_gridu_pip_name'))]"
+                            },
+                            "subnet": {
+                                "id": "[concat(resourceId('Microsoft.Network/virtualNetworks', parameters('virtualNetworks_virtual_network_name')), '/subnets/', 'GatewaySubnet')]"
+                            }
+                        }
+                    }
+                ],
+                "sku": {
+                    "name": "[concat('VpnGw1')]",
+                    "tier": "[concat('VpnGw1')]",
+                    "capacity": 2
+                },
+                "gatewayType": "Vpn",
+                "vpnType": "RouteBased",
+                "enableBgp": false,
+                "activeActive": false,
+                "vpnClientConfiguration": {
+                    "vpnClientAddressPool": {
+                        "addressPrefixes": [
+                            "172.16.201.0/28"
+                        ]
+                    },
+                    "vpnClientProtocols": [
+                        "OpenVPN",
+                        "IkeV2"
+                    ],
+                    "vpnClientRootCertificates": [
+                        {
+                            "name": "cert",
+                            "properties": {
+                                "publicCertData": "MIICvjCCAaYCCQD8+MIX9LynwjANBgkqhkiG9w0BAQsFADAhMR8wHQYDVQQDDBbDosKAwp1NeUF6dXJlVlBOw6LCgMKdMB4XDTE4MTIxNjEzMTUzOFoXDTI4MTIxMzEzMTUzOFowITEfMB0GA1UEAwwWw6LCgMKdTXlBenVyZVZQTsOiwoDCnTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANt5Ui+bTUFoTObbPXdGfI/F6OW9JfTJHNWQujvX/3AEr8LH1IWFBi/GLwtgrP67dgRxnwFMPywTtN8EfhbEFZlbl+t40DbjCHYlm/qBrxa6cTNQdui7p/ozcwTzAim1rW1m3xowJokWhEXnt+fDQix0WfUpAYSgOp8UGw3BC9yZtCKH9+37NbUixtil4omDgAU+xCZHlGAEflbn8ODAEXLQyNZ/E1KMkWHA0gOD9k106WffYKamShXtmqKujUeYluZYPBHq5BnDkt5OHTq2S0Q5kap0ECjZALfNZBC7CVw3vCwokhFg3ETr/ORfO8vt8eDM7l9VSV3u+C8dCTddtWUCAwEAATANBgkqhkiG9w0BAQsFAAOCAQEAPZSXSNlyrbKZx+9TaBa/AnbKEC9KiSfVGT0Ryki9qvcxWkg+RU3U+KkDiAS7A8Z1g8VuZWaQFu0S1UdH2Z98iTOIfwCSRm9mjpj+R5rBwpT7KMODB8fCfSNYpVc1RuyGrqzY4xZ9UKUksMSeqnLq9wH68lJrd9tswY+pvv8UWh+mJcdPz08YTt2mEhsAy+JoVm2c0HqsjrLU4n7+xVVsSV/CkhNXMfOWx9nBmoe9GMUPIpASzzsN+O3tzG9EXayzHTc5dw0Iubr173GQ+GL4fOkwMZZOjqBqVmQwygvqROHrUao6D3J/e+Bjpt2WNEt+a0r14DdLE5qRKcQ4xU7nDw=="
+                            }
+                        }
+                    ],
+                    "vpnClientRevokedCertificates": [],
+                    "vpnClientIpsecPolicies": []
+                }
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/publicIPAddresses', parameters('publicIPAddresses_gridu_pip_name'))]",
+                "[resourceId('Microsoft.Network/virtualNetworks', parameters('virtualNetworks_virtual_network_name'))]"
+            ]
+        }
+    ]
+}
